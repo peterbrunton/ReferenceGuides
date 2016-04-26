@@ -1,0 +1,204 @@
+**WARNING DEPRECATED METHODS USED IN THIS RG**
+
+- DOM selectors: The functions in this RG use DOM selectors that are subject to change. In production, do not use these functions if your solution is still going to de dependent on the DOM selectors.
+  * The subtotal price is targeted using the data attribute [data-checkout-subtotal-price-target] which is html generated from a liquid drop, there are no name attributes that can target the subtotal price. 
+  * The discount code is being applied as text on the class .applied-reduction-code__information, this is also html generated from a liquid drop.
+
+## The Problem
+
+The merchant wants a discount code to be automatically applied if the cart order total is over a certain threshold.
+
+## The Solution
+
+### Step 1 - Creating the Discount Codes
+
+First up, we create the discount codes:
+
+![https://screenshot.click/30-01-pxj4m-td513.png](https://screenshot.click/30-01-pxj4m-td513.png)
+
+In order to ensure that the discount code is only applicable to orders over a certain threshold, it is important that you **define said threshold** when you create the discount code. This will negate the need for us to throw a faux error message if the order total doesn't meet the required threshold.
+
+### Step 2 - Creating and Defining Theme Settings
+
+Next up we need to create and define some theme settings to target these new codes and their thresholds. These are defined by a **comma separated, colon delimited list*** of codes and the cents-value of the order price threshold.
+
+**settings_schema.json**
+
+```javascript
+{
+  "name": "Auto Discounts [Plus]",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Auto Discounts"
+    },
+    {
+      "type": "paragraph",
+      "content": "Automatically apply discounts based on Cart total threshold"
+    },
+    {
+      "type": "checkbox",
+      "id": "enable_auto_discounts",
+      "label": "Enable Auto Discounts"
+    },
+    {
+      "type": "textarea",
+      "id": "auto_discount_codes",
+      "label": "Discount Codes and Cart Total Thresholds",
+      "info": "Define a comma separated list of discount codes and the cart total threshold (in cents) at which you want it to be applied (e.g. DISCOUNT5:2000,DISCOUNT10:40000)"
+    }
+  ]
+}
+```
+
+![https://screenshot.click/28-00-5cloi-vyh5p.png](https://screenshot.click/28-00-5cloi-vyh5p.png)
+
+### Step 3 - Implementing Functionality
+
+Basically what we do is create a javascript object array from the theme settings, check to see if any of the defined discount codes have a threshold equal-to or greater-than the cart total, and if so, we apply the relevant discount code using URL parameters.
+
+As per our [Best Practices RG](https://github.com/Shopify/plus-theme-support/blob/theme-settings-boilerplate/Reference%20Guides/Theme%20settings%20boilerplate.md) we will add all of the relevant code into a single snippet.
+
+#### The Breakdown:
+
+**Define variables** - this is where we get the cart total *before* the discount code has been applied, the current  discount code, and define an empty variable for the potential auto discount code.
+```javascript
+  // Define global variables
+  var checkoutSubtotal = $('[data-checkout-subtotal-price-target]').data('checkout-subtotal-price-target'),
+    appliedDiscountCode = $('.applied-reduction-code__information').text(),
+    applicableDiscountCode;
+```
+**Define Discount Code object array** - Get the discount codes and relevant price thresholds from `{{ settings.auto_discount_codes }}` and convert it into a javascript object array.
+```javascript
+  // Define object array of discount codes and price thresholds
+  {% assign discount_array = settings.auto_discount_codes | strip_newlines | split: ',' %}
+  var discountObjArray = [
+    {% for d in discount_array %}
+    {% assign d_code = d | split: ':' | first %}
+    {% assign d_thresh = d | split: ':' | last | plus: 0 %}
+    {code:'{{ d_code }}', threshold: {{ d_thresh }}}{% unless forloop.last %},{% endunless %}
+    {% endfor %}
+  ];
+```
+**Reorder discount array into descending order** - doing this will ensure that the highest/best discount is applied and will prevent the need to loop through the lower discounts first.
+```javascript
+  // Re-order discountObjArray in descending value    
+  discountObjArray.sort(function(a, b) {
+    return b.threshold-a.threshold;
+  });
+```
+**Does the order qualify for an auto discount?** - We loop through the array of discount codes and their thresholds. If the `checkoutSubtotal` is greater-than or equal-to a discount threshold we store the code in the `applicableDiscountCode` variable and break the `each()` loop.
+```javascript
+  // Loop through discount code and threshold array
+  $.each(discountObjArray, function(key, obj) {
+    var code = obj.code.toUpperCase(),
+      threshold = obj.threshold;
+
+    // If cart total is greater than threshold, get applicable discount code
+    if (checkoutSubtotal >= threshold) {
+      applicableDiscountCode = code;
+      return false;
+    }
+  });
+```
+**Check for existing discount code** - if an alternate discount code has been explicitly applied, we don't want to override it with our auto discount, so we set the `applicableDiscountCode` variable to `null`.
+```javascript
+  // If alternate discount code has been applied, clear applicable discount code variable
+  if (appliedDiscountCode !== '' && appliedDiscountCode !== applicableDiscountCode) {
+    applicableDiscountCode = null;
+  }
+```
+**Apply discount using URL paramater** - If `applicableDiscountCode` is valid and it hasn't already been applied, we get the current `location.search` value and apply the `discount` parameter with the `applicableDiscountCode` value.
+```javascript
+  // If there a valid discount code, update the discount URL parameter
+  if (applicableDiscountCode && applicableDiscountCode !== appliedDiscountCode) {
+    var queryString = 'discount=' + applicableDiscountCode;
+
+    location.search = queryString;
+  }
+```
+**Call the function** - All of the above code will be wrapped in the scope of a `Plus.applyDiscount()` function which we call whenever the page loads.
+```javascript
+$(document).on('page:load', function() {
+
+  // Parse in variables and initiate function
+  Plus.applyDiscount();
+
+});
+```
+
+## All Together Now
+**checkout.liquid**
+```html
+{% include 'plus_auto_discounts' with settings.enable_auto_discounts %}
+```
+
+**plus_auto_discounts.liquid**
+```javascript
+{% if plus_auto_discounts %}
+
+<script>
+
+  Plus = window.Plus || {};
+
+  Plus.applyDiscount = function() {
+
+    // Define global variables
+    var checkoutSubtotal = $('[data-checkout-subtotal-price-target]').data('checkout-subtotal-price-target'),
+      appliedDiscountCode = $('.applied-reduction-code__information').text(),
+      applicableDiscountCode;
+
+    // Define object array of discount codes and price thresholds
+    {% assign discount_array = settings.auto_discount_codes | strip_newlines | split: ',' %}
+    var discountObjArray = [
+      {% for d in discount_array %}
+      {% assign d_code = d | split: ':' | first %}
+      {% assign d_thresh = d | split: ':' | last | plus: 0 %}
+      {code:'{{ d_code }}', threshold: {{ d_thresh }}}{% unless forloop.last %},{% endunless %}
+      {% endfor %}
+    ];
+
+    // Re-order discountObjArray in descending value    
+    discountObjArray.sort(function(a, b) {
+      return b.threshold-a.threshold;
+    });
+
+    // Loop through discount code and threshold array
+    $.each(discountObjArray, function(key, obj) {
+      var code = obj.code.toUpperCase(),
+        threshold = obj.threshold;
+
+      // If cart total is greater than threshold, get applicable discount code
+      if (checkoutSubtotal >= threshold) {
+        applicableDiscountCode = code;
+        return false;
+      }
+    });
+
+    // If alternate discount code has been applied, clear applicable discount code variable
+    if (appliedDiscountCode !== '' && appliedDiscountCode !== applicableDiscountCode) {
+      applicableDiscountCode = null;
+    }
+
+    // If there a valid discount code, update the discount URL parameter
+    if (applicableDiscountCode && applicableDiscountCode !== appliedDiscountCode) {
+      var queryString = 'discount=' + applicableDiscountCode;
+
+      location.search = queryString;
+    }
+
+  };
+
+  $(document).on('page:load', function() {
+
+    // Parse in variables and initiate function
+    Plus.applyDiscount();
+
+  });
+
+</script>
+
+{% endif %}
+```
+
+**FIN**
