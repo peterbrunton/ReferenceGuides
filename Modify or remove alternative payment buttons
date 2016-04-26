@@ -1,0 +1,75 @@
+# Modify or remove alternative payment buttons
+
+Merchants sometimes want the alternative payment methods listed at the top of
+checkout removed.  These are often PayPal or Amazon.
+
+![http://take.ms/HQyJc](http://take.ms/HQyJc)
+
+## Solution
+
+You have a couple means at your disposal:
+
+* Remove liquid drop for `{{ alternative_payment_methods }}`.
+* Hiding with inline CSS.
+* Modifying with a liquid filter.
+
+### Remove liquid drop
+
+In the the checkout.liquid file, remove `{{ alternative_payment_methods }}`. This
+will remove the DOM element which wraps the output as well.
+
+![http://take.ms/21ELz](http://take.ms/21ELz)
+
+### Hiding with CSS
+
+Without any DOM dependencies, we can simply wrap the liquid drop in a `span` and hide it.
+
+```
+<style>
+.hidden {
+  display: none !important;
+}
+</style>
+```
+
+And the html: `<span class="hidden">{{ alternative_payment_methods }}</span>`.
+
+### Modifying with a liquid filter
+
+This is advanced level stuff, but you can actual modify the output of `{{ alternative_payment_methods }}`.
+Since this is just a liquid object that outputs a string of HTML, you are able to use
+[string filters](https://docs.shopify.com/themes/liquid-documentation/filters/string-filters).
+
+**Example**: Replace the PayPal button image
+
+If you wanted to change the PayPal image `src` attribute, you can grab
+a new URL at [PayPal's updated logos page](https://www.paypal.com/webapps/mpp/logos-buttons) or
+grab one in a different language from [PayPal's archive site](https://developer.paypal.com/docs/classic/archive/buttons/).
+
+```javascript
+{% assign oldLogo = "https://www.paypalobjects.com/webstatic/en_US/btn/btn_checkout_pp_142x27.png" %}
+{% assign newLogo = "https://www.paypalobjects.com/webstatic/en_US/i/buttons/ppcredit-logo-small.png" %}
+{{ alternative_payment_methods | replace: oldLogo, newLogo }}
+```
+
+![http://take.ms/DE2zv](http://take.ms/DE2zv)
+
+## FAQs
+
+**Q**: When do these alternative payment buttons show up?
+
+**A**: These buttons will appear in the header of checkout **if** the customer
+was not shown them on the storefront, typically seen on the cart page.  
+
+More specifically: if the liquid object `{{ content_for_additional_checkout_buttons }}` was not rendered in a template file or `theme.liquid` during the customer's session, then the `{{ alternative_payment_methods }}` liquid object will output the
+payment buttons at checkout.
+
+There is some back-end magic going on that keeps track of whether that liquid object was rendered.  This will also explain a lot of
+"randomness" in their appearance you may _feel_ you are witnessing.  Themes that have a direct to checkout flow, or merchants using the Buy Button channel will see these buttons the most.
+
+---
+
+**Q**: Why are these buttons there at all?
+
+**A**: Shopify has an agreement with PayPal and Amazon to have these buttons appear
+in every initialized shop.  Removing them is totally fine though (confirmed with legal).
